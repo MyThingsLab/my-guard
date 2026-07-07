@@ -1,5 +1,7 @@
 # my-guard
 
+[![CI](https://github.com/MyThingsLab/my-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/MyThingsLab/my-guard/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/MyThingsLab/my-guard/branch/main/graph/badge.svg)](https://codecov.io/gh/MyThingsLab/my-guard) ![Python](https://img.shields.io/badge/python-3.11%2B-blue) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 The **rule engine** for [MyThingsLab](../mythings-core). Core defines the
 vocabulary — `Action`, `Decision` (allow / ask / deny), and the `Policy`
 protocol; `my-guard` supplies the implementation that turns a proposed `Action`
