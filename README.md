@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/MyThingsLab/my-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/MyThingsLab/my-guard/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/MyThingsLab/my-guard/branch/main/graph/badge.svg)](https://codecov.io/gh/MyThingsLab/my-guard) ![Python](https://img.shields.io/badge/python-3.11%2B-blue) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-The **rule engine** for [MyThingsLab](../mythings-core). Core defines the
+The **rule engine** for [MyThingsLab](../my-things-core). Core defines the
 vocabulary — `Action`, `Decision` (allow / ask / deny), and the `Policy`
 protocol; `my-guard` supplies the implementation that turns a proposed `Action`
 into a `PolicyResult`.
@@ -33,7 +33,7 @@ when no human is watching.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ../mythings-core -e ".[dev]"
+pip install -e ../my-things-core -e ".[dev]"
 pytest
 ```
 
