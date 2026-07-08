@@ -4,12 +4,12 @@ You are developing **my-guard**, a MyThingsLab My[X] tool.
 
 **Inherited rules:** obey [`./HARNESS.md`](./HARNESS.md) in full — the vendored
 MyThingsLab build-harness rules. Do not restate or override them. Anything not
-covered here defers to `HARNESS.md`, then `mythings-core/docs/CONVENTIONS.md`.
+covered here defers to `HARNESS.md`, then `my-things-core/docs/CONVENTIONS.md`.
 
 ## This tool
 
 - **Purpose:** the rule engine — evaluates an `Action` to allow / ask / deny,
-  implementing mythings-core's `Policy` contract.
+  implementing my-things-core's `Policy` contract.
 - **The single Engine call:** optional, opt-in via `Guard(engine=...)` (defaults
   to `None` — fully deterministic, zero behavior change). Fires only when no
   explicit rule matches: classifies the action as `ALLOW`/`ASK`/`DENY` in one
