@@ -3,6 +3,7 @@ from __future__ import annotations
 from mythings.engine import Engine, EngineRequest
 from mythings.policy import Action, Decision, PolicyResult
 
+from myguard.ask import AskChannel, ask_channel_from_env
 from myguard.rules import Rule, default_rules
 
 _JUDGE_SYSTEM = (
@@ -27,12 +28,20 @@ class Guard:
         *,
         default: Decision = Decision.ALLOW,
         engine: Engine | None = None,
+        ask: AskChannel | None = None,
     ) -> None:
         self.rules = default_rules() if rules is None else list(rules)
         self.default = default
         self.engine = engine
+        # Defaults to whatever MYTHINGS_ASK_CMD names, so the ~15 `policy or
+        # Guard()` sites across the fleet pick it up without threading an argument
+        # through any of them. Pass ask=... explicitly to override (tests do).
+        self.ask = ask_channel_from_env() if ask is None else ask
 
     def evaluate(self, action: Action) -> PolicyResult:
+        return self._escalate(self._decide(action), action)
+
+    def _decide(self, action: Action) -> PolicyResult:
         for rule in self.rules:
             if rule.applies(action):
                 return PolicyResult(rule.decision, reason=rule.reason, rule=rule.name)
@@ -40,10 +49,26 @@ class Guard:
             return PolicyResult(self.default, rule="default")
         return self._judge(action)
 
+    def _escalate(self, result: PolicyResult, action: Action) -> PolicyResult:
+        # ASK is the only decision a human can change. An ALLOW or a DENY is the
+        # rule engine having already made up its mind, and routing those past a
+        # human would let a channel *widen* the policy -- an ask channel may only
+        # ever resolve an open question, never reopen a settled one.
+        if result.decision is not Decision.ASK or self.ask is None:
+            return result
+        decided = self.ask(action)
+        return PolicyResult(
+            decided,
+            reason=f"{result.reason} -> human said {decided.value}".strip(" ->"),
+            rule=f"{result.rule}+ask" if result.rule else "ask",
+        )
+
     def _judge(self, action: Action) -> PolicyResult:
-        reply = self.engine.run(
-            EngineRequest(prompt=_judge_prompt(action), system=_JUDGE_SYSTEM)
-        ).text.strip().upper()
+        reply = (
+            self.engine.run(EngineRequest(prompt=_judge_prompt(action), system=_JUDGE_SYSTEM))
+            .text.strip()
+            .upper()
+        )
         decision = _DECISIONS_BY_WORD.get(reply)
         if decision is None:
             # An engine was explicitly wired in but gave no usable answer —
