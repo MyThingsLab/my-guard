@@ -1,3 +1,4 @@
+import pytest
 from mythings.engine import EngineRequest, EngineResult
 from mythings.policy import Action, Decision, Policy, PolicyResult
 
@@ -126,3 +127,99 @@ def test_engine_empty_reply_fails_safe_to_ask() -> None:
     result = g.evaluate(bash("ls -la"))
     assert result.decision is Decision.ASK
     assert result.rule == "engine_judgment_failed"
+
+
+# ----------------------------------------------------------------- ask channel
+#
+# A rule answering ASK means "a human should confirm". Unattended there was nobody
+# to confirm, so every caller's .under(unattended=True) collapsed it to DENY -- and
+# the human was never actually asked. An ask channel is how they answer. Guard runs
+# a command and reads its exit code; it knows nothing about Telegram.
+
+
+class _Channel:
+    def __init__(self, decision: Decision) -> None:
+        self.decision = decision
+        self.asked: list[Action] = []
+
+    def __call__(self, action: Action) -> Decision:
+        self.asked.append(action)
+        return self.decision
+
+
+def _ask_guard(channel) -> Guard:
+    # A rule set whose only verdict is ASK, so the channel is always consulted.
+    return Guard(
+        [Rule(name="confirm", kind="risky", decision=Decision.ASK, reason="confirm first")],
+        ask=channel,
+    )
+
+
+def test_a_human_can_turn_an_ask_into_an_allow() -> None:
+    channel = _Channel(Decision.ALLOW)
+
+    result = _ask_guard(channel).evaluate(Action(kind="risky", payload={"x": 1}))
+
+    assert result.decision is Decision.ALLOW
+    assert channel.asked == [Action(kind="risky", payload={"x": 1})]
+    # And it survives the collapse every caller applies -- which is the entire
+    # point: unattended, this used to be a silent DENY.
+    assert result.under(unattended=True) is Decision.ALLOW
+
+
+def test_a_human_can_turn_an_ask_into_a_deny() -> None:
+    result = _ask_guard(_Channel(Decision.DENY)).evaluate(Action(kind="risky"))
+
+    assert result.decision is Decision.DENY
+
+
+def test_an_ask_channel_may_never_widen_an_allow_or_a_deny() -> None:
+    # A channel resolves an open question; it must never reopen a settled one, or
+    # a compromised/buggy channel could turn a DENY rule into an ALLOW.
+    channel = _Channel(Decision.ALLOW)
+    guard = Guard(
+        [
+            Rule(name="never", kind="forbidden", decision=Decision.DENY, reason="no"),
+            Rule(name="fine", kind="routine", decision=Decision.ALLOW, reason="ok"),
+        ],
+        ask=channel,
+    )
+
+    assert guard.evaluate(Action(kind="forbidden")).decision is Decision.DENY
+    assert guard.evaluate(Action(kind="routine")).decision is Decision.ALLOW
+    assert channel.asked == []  # never consulted
+
+
+def test_without_a_channel_behavior_is_exactly_what_it_was() -> None:
+    # The rollback path: unset the env var and ASK is returned untouched, for the
+    # caller to collapse to DENY as it always did.
+    result = Guard(
+        [Rule(name="confirm", kind="risky", decision=Decision.ASK, reason="confirm first")],
+        ask=None,
+    ).evaluate(Action(kind="risky"))
+
+    assert result.decision is Decision.ASK
+    assert result.under(unattended=True) is Decision.DENY
+
+
+def test_ask_none_disables_escalation_even_when_the_env_configures_a_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `ask=None` must mean "explicitly no channel", not "unspecified". The caller who
+    # most needs this is MyTelegramBot's daemon: it *is* the ask channel, so a Guard
+    # that escalates inside it would shell out to `mytelegrambot ask`, which blocks
+    # on a ledger callback only that same single-threaded daemon can write --
+    # deadlocking it against itself, and stalling every worker's escalation behind it.
+    #
+    # Defaulting on the value None would have made that opt-out a silent no-op.
+    monkeypatch.setenv("MYTHINGS_ASK_CMD", "mytelegrambot ask")
+
+    assert Guard().ask is not None  # a bare Guard picks the channel up from the env
+    assert Guard(ask=None).ask is None  # and this is how you refuse it
+
+    result = Guard(
+        [Rule(name="confirm", kind="risky", decision=Decision.ASK, reason="confirm")], ask=None
+    ).evaluate(Action(kind="risky"))
+
+    assert result.decision is Decision.ASK  # never escalated
+    assert result.under(unattended=True) is Decision.DENY  # and fails closed as before
