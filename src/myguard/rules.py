@@ -31,6 +31,17 @@ def _matches(pattern: re.Pattern[str]) -> Callable[[Action], bool]:
     return lambda action: pattern.search(_command(action)) is not None
 
 
+# The one action kind the fleet has a hard rule about, so it gets a canonical name.
+#
+# `no_merge` below only ever caught the *bash spelling* of a merge -- a worker
+# shelling out to `gh pr merge`. A tool merging through a structured Action matched
+# no rule at all, fell through to the permissive default, and was **ALLOWED,
+# unattended, with no human anywhere near it** -- exactly inverting the fleet's most
+# important rule. Anything that merges must use this kind, so the rule below can see
+# it. (Guard's default for an unmatched action is ALLOW, so an action kind nobody
+# wrote a rule for is an action nobody is guarding.)
+MERGE_ACTION = "pr-merge"
+
 _MERGE = re.compile(r"\b(git\s+merge\b|gh\s+pr\s+merge\b)")
 _FORCE_PUSH = re.compile(r"\bgit\s+push\b.*(--force(-with-lease)?\b|\s-f\b)")
 _PUSH_PROTECTED = re.compile(r"\bgit\s+push\b.*\b(main|master)\b")
@@ -42,6 +53,12 @@ _DESTRUCTIVE = re.compile(
 def default_rules() -> list[Rule]:
     # First match wins; anything unmatched falls through to the engine's default.
     return [
+        Rule(
+            "merge_needs_a_human",
+            Decision.ASK,
+            "merge authority stays with a human — approve it, or it does not happen",
+            kind=MERGE_ACTION,
+        ),
         Rule(
             "no_merge",
             Decision.DENY,

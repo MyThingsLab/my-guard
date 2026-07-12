@@ -3,6 +3,7 @@ from mythings.engine import EngineRequest, EngineResult
 from mythings.policy import Action, Decision, Policy, PolicyResult
 
 from myguard import Guard, Rule
+from myguard.rules import MERGE_ACTION
 
 
 class _SpyEngine:
@@ -223,3 +224,54 @@ def test_ask_none_disables_escalation_even_when_the_env_configures_a_channel(
 
     assert result.decision is Decision.ASK  # never escalated
     assert result.under(unattended=True) is Decision.DENY  # and fails closed as before
+
+
+# ------------------------------------------------------------------ merging
+#
+# "A human always merges" is the fleet's hardest rule. Until now it was enforced
+# only against the *bash spelling* of a merge -- `no_merge` matches a command string
+# containing `gh pr merge`. A tool merging through a structured Action matched no
+# rule, fell through to Guard's permissive default, and was ALLOWED, unattended,
+# with no human anywhere near it.
+
+
+def test_a_structured_merge_is_not_allowed_by_default() -> None:
+    # The hole this closes. Before the `merge_needs_a_human` rule this returned
+    # ALLOW/default, so a tool merging via an Action bypassed the fleet's most
+    # important invariant entirely.
+    result = Guard().evaluate(Action(kind=MERGE_ACTION, payload={"repo": "o/r", "number": 12}))
+
+    assert result.decision is not Decision.ALLOW
+    assert result.rule == "merge_needs_a_human"
+
+
+def test_an_unattended_merge_still_denies_when_nobody_can_be_asked() -> None:
+    # No ask channel -> the ASK collapses to DENY, exactly as it always did. A
+    # headless worker can never merge, channel or no channel.
+    result = Guard(ask=None).evaluate(Action(kind=MERGE_ACTION, payload={"number": 12}))
+
+    assert result.under(unattended=True) is Decision.DENY
+
+
+def test_a_human_reachable_on_the_ask_channel_can_approve_a_merge() -> None:
+    # And with a human reachable, the tap *is* the human merging -- which is what
+    # the rule always required, and what previously cost a trip to a laptop.
+    approved = Guard(ask=lambda action: Decision.ALLOW).evaluate(
+        Action(kind=MERGE_ACTION, payload={"number": 12})
+    )
+    refused = Guard(ask=lambda action: Decision.DENY).evaluate(
+        Action(kind=MERGE_ACTION, payload={"number": 12})
+    )
+
+    assert approved.under(unattended=True) is Decision.ALLOW
+    assert refused.under(unattended=True) is Decision.DENY
+
+
+def test_a_worker_shelling_out_to_merge_is_still_denied_outright() -> None:
+    # The bash path stays a hard DENY, not an ASK: a worker must never even be able
+    # to *propose* a merge. Only a tool using the structured action gets to ask.
+    result = Guard().evaluate(Action(kind="bash", payload={"command": "gh pr merge 12 --squash"}))
+
+    assert result.decision is Decision.DENY
+    assert result.rule == "no_merge"
+    assert result.under(unattended=True) is Decision.DENY
