@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mythings.engine import Engine, EngineRequest
 from mythings.policy import Action, Decision, PolicyResult
 
 from myguard.ask import AskChannel, ask_channel_from_env
 from myguard.rules import Rule, default_rules
+
+# `ask=None` has to mean "explicitly no channel, never escalate", not "unspecified".
+# Without a distinct sentinel the two collapse, and the caller who most needs to opt
+# out cannot: MyTelegramBot's daemon *is* the ask channel, so a Guard that escalates
+# inside it deadlocks the daemon against itself. Defaulting on the value None would
+# have made that opt-out silently a no-op.
+_UNSET: Any = object()
 
 _JUDGE_SYSTEM = (
     "You are a safety gate for an autonomous coding agent's shell/git/gh side "
@@ -28,15 +37,17 @@ class Guard:
         *,
         default: Decision = Decision.ALLOW,
         engine: Engine | None = None,
-        ask: AskChannel | None = None,
+        ask: AskChannel | None = _UNSET,
     ) -> None:
         self.rules = default_rules() if rules is None else list(rules)
         self.default = default
         self.engine = engine
         # Defaults to whatever MYTHINGS_ASK_CMD names, so the ~15 `policy or
         # Guard()` sites across the fleet pick it up without threading an argument
-        # through any of them. Pass ask=... explicitly to override (tests do).
-        self.ask = ask_channel_from_env() if ask is None else ask
+        # through any of them. Pass a channel to override it, or `ask=None` to
+        # disable escalation outright -- which the bot's daemon must, since it is
+        # itself the channel and would otherwise deadlock waiting on its own reply.
+        self.ask = ask_channel_from_env() if ask is _UNSET else ask
 
     def evaluate(self, action: Action) -> PolicyResult:
         return self._escalate(self._decide(action), action)

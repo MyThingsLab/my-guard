@@ -1,3 +1,4 @@
+import pytest
 from mythings.engine import EngineRequest, EngineResult
 from mythings.policy import Action, Decision, Policy, PolicyResult
 
@@ -199,3 +200,26 @@ def test_without_a_channel_behavior_is_exactly_what_it_was() -> None:
 
     assert result.decision is Decision.ASK
     assert result.under(unattended=True) is Decision.DENY
+
+
+def test_ask_none_disables_escalation_even_when_the_env_configures_a_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `ask=None` must mean "explicitly no channel", not "unspecified". The caller who
+    # most needs this is MyTelegramBot's daemon: it *is* the ask channel, so a Guard
+    # that escalates inside it would shell out to `mytelegrambot ask`, which blocks
+    # on a ledger callback only that same single-threaded daemon can write --
+    # deadlocking it against itself, and stalling every worker's escalation behind it.
+    #
+    # Defaulting on the value None would have made that opt-out a silent no-op.
+    monkeypatch.setenv("MYTHINGS_ASK_CMD", "mytelegrambot ask")
+
+    assert Guard().ask is not None  # a bare Guard picks the channel up from the env
+    assert Guard(ask=None).ask is None  # and this is how you refuse it
+
+    result = Guard(
+        [Rule(name="confirm", kind="risky", decision=Decision.ASK, reason="confirm")], ask=None
+    ).evaluate(Action(kind="risky"))
+
+    assert result.decision is Decision.ASK  # never escalated
+    assert result.under(unattended=True) is Decision.DENY  # and fails closed as before
