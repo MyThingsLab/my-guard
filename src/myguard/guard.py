@@ -61,11 +61,20 @@ class Guard:
         if self.default is not Decision.ALLOW:
             # An explicit override (e.g. a locked-down runner) always wins outright.
             return PolicyResult(self.default, rule="default")
-        # myguard#12: nobody wrote a rule for this kind at all -- the fleet's known
-        # routine kinds are enumerated in default_rules(), so reaching here means a
-        # genuinely new, unreviewed action kind. `_escalate` resolves this ASK via
-        # the ask channel when one is armed, and collapses to DENY otherwise --
-        # fail safe unattended, ask a human when one is reachable.
+        if action.kind == "bash":
+            # `bash` is an open-ended shell escape hatch, not an enumerable set of
+            # kinds -- its safety comes from the pattern rules above (no_merge,
+            # no_force_push, protect_main, confirm_destructive), and its default
+            # has always been permissive by design. myguard#12 is about a *new
+            # structured* Action kind nobody wrote a rule for, not an arbitrary
+            # bash command no regex happens to cover yet.
+            return PolicyResult(Decision.ALLOW, rule="default")
+        # myguard#12: nobody wrote a rule for this (non-bash) kind at all -- the
+        # fleet's known routine kinds are enumerated in default_rules(), so
+        # reaching here means a genuinely new, unreviewed structured action.
+        # `_escalate` resolves this ASK via the ask channel when one is armed,
+        # and collapses to DENY otherwise -- fail safe unattended, ask a human
+        # when one is reachable.
         return PolicyResult(Decision.ASK, rule="default")
 
     def _escalate(self, result: PolicyResult, action: Action) -> PolicyResult:
