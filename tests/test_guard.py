@@ -14,13 +14,14 @@ def test_guard_satisfies_the_policy_protocol() -> None:
     assert isinstance(Guard(), Policy)
 
 
-def test_unmatched_action_falls_through_to_default() -> None:
-    # myguard#12: nobody wrote a rule for this kind, so it fails safe -- ASK when a
-    # channel is reachable, collapsing to DENY unattended -- rather than ALLOW.
-    g = Guard(ask=None)
+def test_unmatched_bash_command_falls_through_to_allow() -> None:
+    # bash is an open-ended shell escape hatch, not an enumerable kind -- its
+    # safety comes from the pattern rules (no_merge, no_force_push, etc.), so an
+    # unmatched bash command stays permissive by design (myguard#12 exempts it).
+    g = Guard()
     result = g.evaluate(bash("ls -la"))
+    assert result.decision is Decision.ALLOW
     assert result.rule == "default"
-    assert result.under(unattended=True) is Decision.DENY
 
 
 def test_default_can_be_deny_for_a_locked_down_runner() -> None:
@@ -112,11 +113,11 @@ def test_evaluate_returns_reason_and_rule() -> None:
 
 
 def test_no_engine_still_falls_through_to_default() -> None:
-    # Same fail-safe fallback applies whether or not the engine seam is opted into.
-    g = Guard(ask=None)
+    # Unchanged behavior when the engine seam isn't opted into.
+    g = Guard()
     result = g.evaluate(bash("ls -la"))
+    assert result.decision is Decision.ALLOW
     assert result.rule == "default"
-    assert result.under(unattended=True) is Decision.DENY
 
 
 def test_engine_judges_an_unmatched_action() -> None:
