@@ -56,9 +56,17 @@ class Guard:
         for rule in self.rules:
             if rule.applies(action):
                 return PolicyResult(rule.decision, reason=rule.reason, rule=rule.name)
-        if self.engine is None:
+        if self.engine is not None:
+            return self._judge(action)
+        if self.default is not Decision.ALLOW:
+            # An explicit override (e.g. a locked-down runner) always wins outright.
             return PolicyResult(self.default, rule="default")
-        return self._judge(action)
+        # myguard#12: nobody wrote a rule for this kind at all -- the fleet's known
+        # routine kinds are enumerated in default_rules(), so reaching here means a
+        # genuinely new, unreviewed action kind. `_escalate` resolves this ASK via
+        # the ask channel when one is armed, and collapses to DENY otherwise --
+        # fail safe unattended, ask a human when one is reachable.
+        return PolicyResult(Decision.ASK, rule="default")
 
     def _escalate(self, result: PolicyResult, action: Action) -> PolicyResult:
         # ASK is the only decision a human can change. An ALLOW or a DENY is the

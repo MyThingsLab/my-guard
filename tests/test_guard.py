@@ -15,15 +15,50 @@ def test_guard_satisfies_the_policy_protocol() -> None:
 
 
 def test_unmatched_action_falls_through_to_default() -> None:
-    g = Guard()
+    # myguard#12: nobody wrote a rule for this kind, so it fails safe -- ASK when a
+    # channel is reachable, collapsing to DENY unattended -- rather than ALLOW.
+    g = Guard(ask=None)
     result = g.evaluate(bash("ls -la"))
-    assert result.decision is Decision.ALLOW
     assert result.rule == "default"
+    assert result.under(unattended=True) is Decision.DENY
 
 
 def test_default_can_be_deny_for_a_locked_down_runner() -> None:
     g = Guard(rules=[], default=Decision.DENY)
     assert g.evaluate(bash("echo hi")).decision is Decision.DENY
+
+
+def test_default_override_wins_even_with_an_ask_channel_armed() -> None:
+    # An explicit default is the caller opting out of the fail-safe fallback
+    # entirely, so it must not be second-guessed by an ask channel either.
+    g = Guard(rules=[], default=Decision.DENY, ask=lambda action: Decision.ALLOW)
+    assert g.evaluate(bash("echo hi")).decision is Decision.DENY
+
+
+@pytest.mark.parametrize(
+    "kind", ["issue-create", "issue-comment", "fs-write", "repo-create", "tracking-issue-edit"]
+)
+def test_known_routine_kinds_are_allowed_explicitly(kind: str) -> None:
+    # myguard#12: these used to reach ALLOW only via the permissive fallthrough;
+    # they now have their own rule, so they stay silent even once the fallback
+    # for genuinely unrecognised kinds starts asking.
+    result = Guard().evaluate(Action(kind=kind, payload={}))
+    assert result.decision is Decision.ALLOW
+    assert result.rule == f"routine_{kind}"
+
+
+def test_unrecognised_kind_asks_when_a_channel_is_armed() -> None:
+    # myguard#12's fix: a kind matching no rule at all is a genuinely new,
+    # unreviewed action -- fail safe by asking, not by allowing it through.
+    channel = _Channel(Decision.DENY)
+    result = Guard(ask=channel).evaluate(Action(kind="brand-new-kind", payload={}))
+    assert result.decision is Decision.DENY
+    assert channel.asked == [Action(kind="brand-new-kind", payload={})]
+
+
+def test_unrecognised_kind_denies_when_no_channel_is_armed() -> None:
+    result = Guard(ask=None).evaluate(Action(kind="brand-new-kind", payload={}))
+    assert result.under(unattended=True) is Decision.DENY
 
 
 def test_merge_is_denied() -> None:
@@ -77,11 +112,11 @@ def test_evaluate_returns_reason_and_rule() -> None:
 
 
 def test_no_engine_still_falls_through_to_default() -> None:
-    # Unchanged behavior when the engine seam isn't opted into.
-    g = Guard()
+    # Same fail-safe fallback applies whether or not the engine seam is opted into.
+    g = Guard(ask=None)
     result = g.evaluate(bash("ls -la"))
-    assert result.decision is Decision.ALLOW
     assert result.rule == "default"
+    assert result.under(unattended=True) is Decision.DENY
 
 
 def test_engine_judges_an_unmatched_action() -> None:

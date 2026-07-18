@@ -31,6 +31,21 @@ def _matches(pattern: re.Pattern[str]) -> Callable[[Action], bool]:
     return lambda action: pattern.search(_command(action)) is not None
 
 
+# Kinds the fleet's tools already issue routinely, today only reachable through the
+# permissive fallthrough (myguard#12: "an action kind nobody wrote a rule for is an
+# action nobody is guarding"). Naming them explicitly means the eventual fallback for
+# truly *unrecognised* kinds can fail closed without also catching this everyday
+# traffic -- an ask channel is armed for a dispatched worker's whole session, so a
+# fallback that asked on every unmatched kind would ask on every one of these, on
+# every call, for the entire fleet.
+_KNOWN_ROUTINE_KINDS = (
+    "issue-create",
+    "issue-comment",
+    "fs-write",
+    "repo-create",
+    "tracking-issue-edit",
+)
+
 # The one action kind the fleet has a hard rule about, so it gets a canonical name.
 #
 # `no_merge` below only ever caught the *bash spelling* of a merge -- a worker
@@ -38,8 +53,7 @@ def _matches(pattern: re.Pattern[str]) -> Callable[[Action], bool]:
 # no rule at all, fell through to the permissive default, and was **ALLOWED,
 # unattended, with no human anywhere near it** -- exactly inverting the fleet's most
 # important rule. Anything that merges must use this kind, so the rule below can see
-# it. (Guard's default for an unmatched action is ALLOW, so an action kind nobody
-# wrote a rule for is an action nobody is guarding.)
+# it, rather than falling through to the ASK/DENY fallback for unrecognised kinds.
 MERGE_ACTION = "pr-merge"
 
 _MERGE = re.compile(r"\b(git\s+merge\b|gh\s+pr\s+merge\b)")
@@ -53,6 +67,15 @@ _DESTRUCTIVE = re.compile(
 def default_rules() -> list[Rule]:
     # First match wins; anything unmatched falls through to the engine's default.
     return [
+        *(
+            Rule(
+                f"routine_{kind}",
+                Decision.ALLOW,
+                "routine structured action, not a fleet invariant",
+                kind=kind,
+            )
+            for kind in _KNOWN_ROUTINE_KINDS
+        ),
         Rule(
             "merge_needs_a_human",
             Decision.ASK,
