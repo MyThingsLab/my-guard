@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "my-guard"
-version = "0.0.1"
+version = "1.0.0"
 description = "The rule engine for MyThingsLab — evaluates an Action to allow/ask/deny."
 authors = [{ name = "Lorenzo Liuzzo", email = "lorenzoliuzzo@outlook.com" }]
 readme = "README.md"
