@@ -9,6 +9,7 @@ from myguard.ask import (
     ASK_COMMAND_ENV,
     ASK_TIMEOUT_ENV,
     DEFAULT_ASK_TIMEOUT,
+    AskChannelUnavailable,
     SubprocessAsk,
     ask_channel_from_env,
 )
@@ -27,6 +28,26 @@ def test_exit_zero_is_the_humans_allow() -> None:
 def test_exit_nonzero_is_a_deny() -> None:
     # `mytelegrambot ask` exits 1 for both a denial and a timeout.
     assert SubprocessAsk("false")(_ACTION) is Decision.DENY
+
+
+def test_exit_nonzero_with_dead_daemon_raises_ask_channel_unavailable() -> None:
+    # #72: A dead daemon on a non-zero exit raises AskChannelUnavailable instead of
+    # silently converting to a human denial.
+    channel = SubprocessAsk("false", liveness_check=lambda: False)
+    with pytest.raises(AskChannelUnavailable, match="daemon is not running"):
+        channel(_ACTION)
+
+
+def test_exit_nonzero_with_live_daemon_returns_deny() -> None:
+    channel = SubprocessAsk("false", liveness_check=lambda: True)
+    assert channel(_ACTION) is Decision.DENY
+
+
+def test_process_error_with_dead_daemon_raises_ask_channel_unavailable() -> None:
+    channel = SubprocessAsk("definitely-not-a-real-binary-xyz", liveness_check=lambda: False)
+    with pytest.raises(AskChannelUnavailable, match="daemon is not running"):
+        channel(_ACTION)
+
 
 
 def test_a_command_that_does_not_exist_denies_rather_than_raising() -> None:
