@@ -37,7 +37,16 @@ def test_default_override_wins_even_with_an_ask_channel_armed() -> None:
 
 
 @pytest.mark.parametrize(
-    "kind", ["issue-create", "issue-comment", "fs-write", "repo-create", "tracking-issue-edit"]
+    "kind",
+    [
+        "issue-create",
+        "issue-comment",
+        "fs-write",
+        "repo-create",
+        "tracking-issue-edit",
+        "fleet-halt",
+        "fleet-resume",
+    ],
 )
 def test_known_routine_kinds_are_allowed_explicitly(kind: str) -> None:
     # myguard#12: these used to reach ALLOW only via the permissive fallthrough;
