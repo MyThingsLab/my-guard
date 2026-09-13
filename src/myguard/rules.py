@@ -44,6 +44,8 @@ _KNOWN_ROUTINE_KINDS = (
     "fs-write",
     "repo-create",
     "tracking-issue-edit",
+    "fleet-halt",
+    "fleet-resume",
 )
 
 # The one action kind the fleet has a hard rule about, so it gets a canonical name.
