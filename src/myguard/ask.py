@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+from collections.abc import Callable
 from typing import Protocol
 
 from mythings.policy import Action, Decision
@@ -37,6 +38,12 @@ ASK_TIMEOUT_ENV = "MYTHINGS_ASK_TIMEOUT"
 DEFAULT_ASK_TIMEOUT = 330.0
 
 
+class AskChannelUnavailable(RuntimeError):
+    """Raised when an ask channel fails because the underlying daemon or service is gone."""
+
+    pass
+
+
 class AskChannel(Protocol):
     # Returns the human's decision. Must never return ASK: an ask channel that
     # cannot resolve an ASK has failed, and a failure is a DENY.
@@ -47,9 +54,19 @@ class SubprocessAsk:
     # Fail-closed is the whole contract. A missing command, a non-zero exit, a
     # timeout, a crash, an un-launchable binary: every one of them is a DENY. The
     # only path to ALLOW is the command exiting 0, which is a human having said so.
-    def __init__(self, command: str, *, timeout: float = DEFAULT_ASK_TIMEOUT) -> None:
+    # If a liveness_check is provided and reports the daemon is dead on a non-zero
+    # exit or process error, raise AskChannelUnavailable so callers can distinguish
+    # a dead channel from a genuine human refusal (#72).
+    def __init__(
+        self,
+        command: str,
+        *,
+        timeout: float = DEFAULT_ASK_TIMEOUT,
+        liveness_check: Callable[[], bool] | None = None,
+    ) -> None:
         self.command = command
         self.timeout = timeout
+        self.liveness_check = liveness_check
 
     def __call__(self, action: Action) -> Decision:
         import json
@@ -70,16 +87,27 @@ class SubprocessAsk:
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            # Includes TimeoutExpired and a command that does not exist. Never let
-            # a broken ask channel become an ALLOW.
+            if self.liveness_check is not None and not self.liveness_check():
+                raise AskChannelUnavailable(
+                    f"ask channel failed and daemon is not running: {type(exc).__name__}"
+                ) from exc
             print(f"myguard: ask channel failed, denying: {type(exc).__name__}")
             return Decision.DENY
+
         if proc.returncode != 0:
+            if self.liveness_check is not None and not self.liveness_check():
+                raise AskChannelUnavailable(
+                    f"ask channel returned code {proc.returncode} and daemon is not running"
+                )
             return Decision.DENY
         return Decision.ALLOW
 
 
-def ask_channel_from_env(env: dict[str, str] | None = None) -> AskChannel | None:
+def ask_channel_from_env(
+    env: dict[str, str] | None = None,
+    *,
+    liveness_check: Callable[[], bool] | None = None,
+) -> AskChannel | None:
     # No command configured -> no channel -> Guard keeps returning ASK and every
     # caller collapses it to DENY exactly as before. Wiring the fleet's human back
     # into the loop is therefore one environment variable, and unsetting it is a
@@ -92,4 +120,14 @@ def ask_channel_from_env(env: dict[str, str] | None = None) -> AskChannel | None
         timeout = float(env.get(ASK_TIMEOUT_ENV, "") or DEFAULT_ASK_TIMEOUT)
     except ValueError:
         timeout = DEFAULT_ASK_TIMEOUT
-    return SubprocessAsk(command, timeout=timeout)
+
+    if liveness_check is None:
+        try:
+            from myfleet.fleet_ask import daemon_is_running
+
+            liveness_check = daemon_is_running
+        except ImportError:
+            liveness_check = None
+
+    return SubprocessAsk(command, timeout=timeout, liveness_check=liveness_check)
+
