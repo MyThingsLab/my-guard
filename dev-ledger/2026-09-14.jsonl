@@ -1,1 +1,2 @@
 {"data":{"session":"2026-09-14"},"detail":"Add fleet-halt and fleet-resume to _KNOWN_ROUTINE_KINDS in Guard rules so kill switch is allowed","kind":"decision","outcome":"success","tool":"claude-code","ts":"2026-09-13T22:06:28Z"}
+{"data":{"session":"2026-09-14"},"detail":"revendor canonical HARNESS.md","kind":"docs","outcome":"success","tool":"claude-code","ts":"2026-09-14T15:41:29Z"}
