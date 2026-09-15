@@ -6,7 +6,14 @@ from mythings.engine import Engine, EngineRequest
 from mythings.policy import Action, Decision, PolicyResult
 
 from myguard.ask import AskChannel, ask_channel_from_env
+from myguard.paths import ProjectRules
 from myguard.rules import Rule, default_rules
+
+# Project rules may only ever tighten, never loosen, so the two rule sets combine by
+# severity rather than by ordering. Ordering cannot express the invariant: prepending
+# lets a project `ask_edit` downgrade a fleet DENY, and appending makes project rules
+# dead behind the routine ALLOWs they exist to override.
+_SEVERITY = {Decision.ALLOW: 0, Decision.ASK: 1, Decision.DENY: 2}
 
 # `ask=None` has to mean "explicitly no channel, never escalate", not "unspecified".
 # Without a distinct sentinel the two collapse, and the caller who most needs to opt
@@ -38,10 +45,15 @@ class Guard:
         default: Decision = Decision.ALLOW,
         engine: Engine | None = None,
         ask: AskChannel | None = _UNSET,
+        project: ProjectRules | None = _UNSET,
     ) -> None:
         self.rules = default_rules() if rules is None else list(rules)
         self.default = default
         self.engine = engine
+        # Same reasoning as `ask` below: discovered from the working tree rather than
+        # threaded through the `policy or Guard()` sites. `project=None` is how a
+        # caller refuses a rule file it would otherwise pick up.
+        self.project = ProjectRules.load() if project is _UNSET else project
         # Defaults to whatever MYTHINGS_ASK_CMD names, so the ~15 `policy or
         # Guard()` sites across the fleet pick it up without threading an argument
         # through any of them. Pass a channel to override it, or `ask=None` to
@@ -50,7 +62,18 @@ class Guard:
         self.ask = ask_channel_from_env() if ask is _UNSET else ask
 
     def evaluate(self, action: Action) -> PolicyResult:
-        return self._escalate(self._decide(action), action)
+        return self._escalate(self._combine(action), action)
+
+    def _combine(self, action: Action) -> PolicyResult:
+        overlay = None if self.project is None else self.project.evaluate(action)
+        if overlay is not None and overlay.decision is Decision.DENY:
+            # Nothing the fleet rules can say makes this less than a DENY, so settle
+            # it here -- and in particular without paying for the engine call below.
+            return overlay
+        fleet = self._decide(action)
+        if overlay is None or _SEVERITY[fleet.decision] >= _SEVERITY[overlay.decision]:
+            return fleet
+        return overlay
 
     def _decide(self, action: Action) -> PolicyResult:
         for rule in self.rules:

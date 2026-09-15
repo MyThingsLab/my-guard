@@ -16,6 +16,27 @@ covered here defers to `HARNESS.md`, then `my-things-core/docs/CONVENTIONS.md`.
   word. Never second-guesses an explicit rule match — deny/ask rules are always
   final. An unparseable/empty reply (including a misconfigured or failing
   engine) fails safe to `ASK`, never to the permissive default.
+- **Project rules — path-shaped, and tighten-only.** The default rules are
+  fleet-wide and command-shaped; a project's own protected paths (generated
+  files, schemas, CI config) are path-shaped and live in a data-only
+  `.my-guard/rules.json` at its root (`deny_edit` / `ask_edit` globs), discovered
+  by walking up from the working directory — the same reasoning as the ask
+  channel's env var, since the ~15 `policy or Guard()` sites have nowhere to
+  thread a rule set through.
+
+  The invariant is that a project may only ever **tighten**. This is why the two
+  rule sets combine by *severity* and not by ordering: prepending project rules
+  would let an `ask_edit` downgrade a fleet `DENY`, and appending them would
+  leave them dead behind the routine `ALLOW`s they exist to override. Neither
+  ordering expresses "stricter wins", so don't reach for one. Two corollaries
+  that must hold: an unmatched path returns **no opinion (`None`), not `ALLOW`**
+  — voting `ALLOW` is how a project rule set would loosen a fleet rule — and a
+  malformed rule file **raises** rather than degrading to "no rules", because a
+  broken deny is indistinguishable from an allow.
+
+  Paths come only from an explicit `path`/`paths` payload key, never scraped from
+  a `command` string: a wrong extraction is a wrong `DENY` on an unrelated file,
+  and a rule set that cries wolf gets switched off.
 - **Invariants:** rules are ordered, first-match-wins, with a configurable
   default; an unanswered `ASK` collapses to `DENY` under an unattended runner. A
   `deny` rule must never silently pass. Default rules deny merge / force-push /

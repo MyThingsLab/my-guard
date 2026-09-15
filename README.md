@@ -29,6 +29,41 @@ An `ASK` result collapses to `DENY` under an unattended runner via
 `PolicyResult.under(unattended=True)`, so nothing proceeds on a would-ask action
 when no human is watching.
 
+## Project rules
+
+Those rules are fleet-wide and command-shaped. A *specific* project also has its
+own protected paths — a generated file that should never be hand-edited, a
+schema, CI config — and those are path-shaped. A project declares them in
+`.my-guard/rules.json` at its root, discovered by walking up from the working
+directory:
+
+```json
+{
+  "deny_edit": ["db/schema.sql", "docs/api/generated/*"],
+  "ask_edit":  ["*.toml", ".github/workflows/*"]
+}
+```
+
+Globs are `fnmatch`, so `*` crosses path separators (`build/*` covers
+`build/a/b.js`), and match against both the repo-relative and the caller-supplied
+spelling of a path. The file is data only — globs and a severity, no executable
+predicates — so it can be authored and reviewed without touching this package.
+
+Two properties make this safe to layer under the fleet rules:
+
+- **Project rules only ever tighten.** The two rule sets combine by severity, not
+  by ordering: the stricter of the two wins. A project `deny_edit` can override
+  the fleet's routine `ALLOW`, but no project rule can turn a fleet `DENY` into
+  an `ASK`. A path matching nothing returns *no opinion*, not `ALLOW`.
+- **A malformed rule file raises.** Degrading to "no rules" would leave a project
+  believing it is protected when it is not, and a broken deny is indistinguishable
+  from an allow.
+
+An action is path-checked only when it carries an explicit `path` or `paths`
+payload key. Paths are deliberately not scraped out of a `command` string: a
+wrong extraction is a wrong `DENY` on an unrelated file, and a rule set that
+cries wolf gets switched off.
+
 ## Install (development)
 
 ```bash
