@@ -47,6 +47,14 @@ def test_a_malformed_rule_file_raises_rather_than_degrading_to_no_rules(tmp_path
         ProjectRules.load(tmp_path)
 
 
+def test_a_rule_file_that_is_not_an_object_raises(tmp_path: Path) -> None:
+    (tmp_path / ".my-guard").mkdir()
+    (tmp_path / RULES_FILE).write_text(json.dumps(["db/schema.sql"]))
+
+    with pytest.raises(ValueError, match="expected a JSON object, got list"):
+        ProjectRules.load(tmp_path)
+
+
 def test_a_rule_file_with_the_wrong_shape_raises(tmp_path: Path) -> None:
     write_rules(tmp_path)
     (tmp_path / RULES_FILE).write_text(json.dumps({"deny_edit": "schema.sql"}))
